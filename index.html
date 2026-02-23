@@ -18,7 +18,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 20px;
+            padding: 8px;
         }
         
         .container {
@@ -28,12 +28,10 @@
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
             padding: 20px;
-            margin-top: 20px;
         }
         
         header {
             text-align: center;
-            margin-bottom: 20px;
         }
         
         h1 {
@@ -237,24 +235,76 @@
                 width: 200px;
             }
         }
+
+        /* Toast 样式 */
+        #toastContainer {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        .toast {
+            min-width: 180px;
+            max-width: 320px;
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            padding: 10px 14px;
+            border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+            font-weight: 600;
+            pointer-events: auto;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .toast.success { background: linear-gradient(90deg,#2ecc71,#27ae60); }
+        .toast.error { background: linear-gradient(90deg,#e74c3c,#c0392b); }
+        .toast.info { background: rgba(0,0,0,0.8); }
+        .toast .toast-message { flex: 1; margin-right: 8px; font-weight:600; }
+        .toast .toast-close { cursor: pointer; opacity: 0.9; padding-left: 8px; }
+        /* 布局：水平排列面板与主容器并居中 */
+        .layout-row {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 20px;
+            margin-bottom: 18px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .panel {
+            width: 280px;
+            background: transparent;
+            padding: 12px 14px;
+            border-radius: 10px;
+        }
     </style>
 </head>
 <body>
     <header>
         <h1>跳棋游戏</h1>
-        <div class="subtitle">吃掉彩色棋子，到达顶部获胜</div>
     </header>
     
     <div class="container">
         <div class="game-area">
             <div class="canvas-container">
-                <canvas id="gameCanvas" width="900" height="900"></canvas>
+                <canvas id="gameCanvas" width="800" height="700"></canvas>
                 <div class="victory-message" id="victoryMessage">🎉 胜利！棋子已到达顶部！</div>
+                <div id="genSpinner" style="display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:200;align-items:center;gap:10px;padding:12px 16px;border-radius:8px;background:rgba(0,0,0,0.65);color:#fff;font-weight:600;">
+                    生成中…
+                </div>
             </div>
             
             <div class="controls">
                 <button id="undoBtn">撤销 (Ctrl+Z)</button>
                 <button id="restartBtn">重新开始</button>
+                <button id="regenBtn">重新生成地图</button>
+                <!-- 地图下拉已移除 -->
+                <!-- 已移除路径高亮控制 -->
             </div>
             
             <div class="stats">
@@ -269,8 +319,36 @@
             </div>
         </div>
     </div>
+    <div id="toastContainer"></div>
 
     <script>
+        // 简单 toast 工具
+        function showToast(message, { type = 'info', duration = 2500, persist = false } = {}) {
+            const container = document.getElementById('toastContainer');
+            if (!container) return null;
+            const id = 'toast-' + Date.now() + '-' + Math.floor(Math.random()*1000);
+            const el = document.createElement('div');
+            el.className = 'toast ' + (type || 'info');
+            el.id = id;
+            el.innerHTML = `<div class="toast-message">${message}</div><div class="toast-close">✕</div>`;
+            container.appendChild(el);
+
+            const closeFn = () => { if (el.parentNode) el.parentNode.removeChild(el); };
+            el.querySelector('.toast-close').addEventListener('click', closeFn);
+
+            if (!persist) {
+                setTimeout(() => { closeFn(); }, duration);
+            }
+
+            return id;
+        }
+
+        function hideToast(id) {
+            const el = document.getElementById(id);
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+        }
+
+        // 固定地图已移除 — 每次加载将使用生成器随机生成可胜利地图
         // -----------------------------------------------------
         // 游戏常量
         // -----------------------------------------------------
@@ -338,17 +416,10 @@
                 this.board = this.createEmptyBoard();
                 this.boardColors = this.createEmptyColorLayer();
                 this.setupBoard();
-                this.createAxialMapping();
                 this.moveCount = 0;
                 this.remainingPieces = 28;
                 this.gameWon = false;
                 this.selected = null;
-                
-                // 保存初始状态
-                this.saveState();
-                
-                // 更新UI显示
-                this.updateUI();
             }
             
             createEmptyBoard() {
@@ -382,35 +453,154 @@
             }
             
             setupBoard() {
-                // 设置障碍物
-                const obstacles = [
-                    [5, 3, COLORS.PURPLE], [5, 11, COLORS.PURPLE],
-                    [6, 5, COLORS.PURPLE], [6, 7, COLORS.PURPLE], [6, 10, COLORS.PURPLE],
-                    [7, 1, COLORS.BLUE], [7, 4, COLORS.BLUE], [7, 7, COLORS.BLUE], [7, 11, COLORS.BLUE],
-                    [8, 5, COLORS.BLUE], [8, 7, COLORS.BLUE], [8, 8, COLORS.BLUE], [8, 9, COLORS.BLUE],
-                    [9, 5, COLORS.PINK], [9, 8, COLORS.PINK],
-                    [10, 2, COLORS.YELLOW], [10, 5, COLORS.YELLOW], [10, 6, COLORS.YELLOW], [10, 8, COLORS.YELLOW],
-                    [11, 1, COLORS.ORANGE], [11, 5, COLORS.ORANGE], [11, 9, COLORS.ORANGE], [11, 10, COLORS.ORANGE],
-                    [13, 3, COLORS.RED], [13, 5, COLORS.RED],
-                    [15, 2, COLORS.RED], [15, 3, COLORS.RED]
-                ];
-                
-                obstacles.forEach(([row, pos, color]) => {
-                    const posIdx = this.logicalToIndex(row, pos);
-                    if (posIdx) {
-                        const [r, c] = posIdx;
-                        this.board[r][c] = OBSTACLE;
-                        this.boardColors[r][c] = color;
+                return new Promise((resolve, reject) => {
+                // 设置障碍物（直接使用生成器）
+                // 使用生成器创建地图（读取 UI 难度/参数）
+                const diffEl = document.getElementById('difficultyRange');
+                const diff = diffEl ? parseInt(diffEl.value || '3', 10) : 3;
+                // 映射：difficulty -> minDirChanges, maxStraight, decorationDensity
+                const options = {
+                    maxSteps: 12,
+                    maxAttempts: 200,
+                    minDirChanges: Math.max(1, diff),
+                    maxStraight: Math.max(1, 3 - Math.floor((diff-1)/2)),
+                    allowLongJumps: false,
+                    decorationDensity: Math.max(0, 0.06 - (diff-1)*0.01)
+                };
+
+                const applyObstacles = (obstacles) => {
+                    this.generatedPathIndices = [];
+                    obstacles = obstacles || [];
+                    obstacles.forEach(([row, pos, color]) => {
+                        const posIdx = this.logicalToIndex(row, pos);
+                        if (posIdx) {
+                            const [r, c] = posIdx;
+                            this.board[r][c] = OBSTACLE;
+                            this.boardColors[r][c] = color;
+                            this.generatedPathIndices.push([r, c]);
+                        }
+                    });
+                    this.remainingPieces = this.generatedPathIndices.length;
+
+                    // 设置玩家并完成后续初始化
+                    const playerPos = this.logicalToIndex(17, 1);
+                    if (playerPos) {
+                        const [r, c] = playerPos;
+                        this.board[r][c] = PLAYER;
+                        this.playerPos = [r, c];
                     }
-                });
-                
-                // 设置玩家
-                const playerPos = this.logicalToIndex(17, 1);
-                if (playerPos) {
-                    const [r, c] = playerPos;
-                    this.board[r][c] = PLAYER;
-                    this.playerPos = [r, c];
+
+                    this.createAxialMapping();
+                    this.moveCount = 0;
+                    // 将当前生成的地图设为新的初始状态：重置历史为仅包含此状态
+                    const initState = {
+                        board: this.board.map(row => [...row]),
+                        boardColors: this.boardColors.map(row => [...row]),
+                        playerPos: this.playerPos ? [...this.playerPos] : null,
+                        moveCount: this.moveCount,
+                        remainingPieces: this.remainingPieces
+                    };
+                    this.history = [initState];
+                    this.updateUI();
+                    this.draw();
+                };
+
+                // 如果有 worker，则异步生成
+                if (window.genWorker) {
+                    const worker = window.genWorker;
+                    const requestId = Date.now() + Math.random();
+                    // request generation
+                    const spinner = document.getElementById('genSpinner');
+                    if (spinner) spinner.style.display = 'flex';
+
+                    const handler = (e) => {
+                        const d = e.data;
+                        if (d && d.requestId && d.requestId !== requestId) return;
+                        if (!d || !d.type) return;
+                        // worker message
+                        // ignore progress messages (no debug/progress UI required)
+                        if (d.type === 'progress') return;
+
+                        if (d.type === 'result') {
+                            // worker result
+                            if (spinner) spinner.style.display = 'none';
+                            worker.removeEventListener('message', handler);
+                            const obstacles = d.obstacles || [];
+                            if (obstacles.length === 0) {
+                                // worker returned empty obstacles, falling back to sync generator
+                                // 如果 worker 未生成有效地图，回退到主线程生成器
+                                if (typeof this.generateWinnableMapReverse === 'function') {
+                                        const fallback = this.generateWinnableMapReverse(options) || [];
+                                    applyObstacles(fallback);
+                                    if (spinner) spinner.style.display = 'none';
+                                    resolve(fallback);
+                                } else {
+                                    applyObstacles([]);
+                                    if (spinner) spinner.style.display = 'none';
+                                    resolve([]);
+                                }
+                            } else {
+                                applyObstacles(obstacles);
+                                if (spinner) spinner.style.display = 'none';
+                                resolve(obstacles);
+                            }
+                            return;
+                        }
+
+                        if (d.type === 'error') {
+                            // worker error
+                            if (spinner) spinner.style.display = 'none';
+                            worker.removeEventListener('message', handler);
+                            // 回退到同步生成器
+                            if (typeof this.generateWinnableMapReverse === 'function') {
+                                const fallback = this.generateWinnableMapReverse(options) || [];
+                                applyObstacles(fallback);
+                                if (spinner) spinner.style.display = 'none';
+                                resolve(fallback);
+                            } else {
+                                applyObstacles([]);
+                                if (spinner) spinner.style.display = 'none';
+                                resolve([]);
+                            }
+                        }
+                    };
+
+                    worker.addEventListener('message', handler);
+                    try {
+                        worker.postMessage({ cmd: 'generate', options, rowsLayout: ROWS_LAYOUT, boardCols: BOARD_COLS, requestId });
+                    } catch (err) {
+                        // Worker postMessage failed, falling back to sync generator
+                        worker.removeEventListener('message', handler);
+                        if (typeof this.generateWinnableMapReverse === 'function') {
+                            const fallback = this.generateWinnableMapReverse(options) || [];
+                            applyObstacles(fallback);
+                            if (spinner) spinner.style.display = 'none';
+                            resolve(fallback);
+                        } else {
+                            applyObstacles([]);
+                            if (spinner) spinner.style.display = 'none';
+                            resolve([]);
+                        }
+                    }
+                    return;
                 }
+
+                // 无 Worker：同步生成（回退）
+                let obstaclesToUse = [];
+                if (typeof this.generateWinnableMapReverse === 'function') {
+                    const generated = this.generateWinnableMapReverse(options);
+                    if (generated && generated.length) {
+                        obstaclesToUse = generated;
+                    } else {
+                        // generator failed to produce a valid map
+                        obstaclesToUse = [];
+                    }
+                }
+
+                applyObstacles(obstaclesToUse);
+                if (document.getElementById('genSpinner')) document.getElementById('genSpinner').style.display = 'none';
+                resolve(obstaclesToUse);
+                });
             }
             
             createAxialMapping() {
@@ -427,6 +617,179 @@
                         }
                     }
                 }
+                // 更新绘制偏移（若需要，可以在 draw 前再次计算以适应 canvas 尺寸变化）
+                this._boardOffset = this._boardOffset || null;
+            }
+
+            computeBoardOffset() {
+                const CELL_SIZE = 40;
+                const Y_SPACING = CELL_SIZE * 0.85;
+                const coords = [];
+                for (let r = 0; r < BOARD_ROWS; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) {
+                        if (this.board[r][c] !== INVALID) {
+                            const x = (c - BOARD_COLS / 2) * CELL_SIZE + (r % 2) * (CELL_SIZE / 2);
+                            const y = r * Y_SPACING;
+                            coords.push([x, y]);
+                        }
+                    }
+                }
+                if (!coords.length) {
+                    this._boardOffset = { x: this.canvas.width / 2, y: 120 };
+                    return;
+                }
+                let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+                for (const [x, y] of coords) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+                const boardCenterX = (minX + maxX) / 2;
+                const boardCenterY = (minY + maxY) / 2;
+                const canvasCenterX = this.canvas.width / 2;
+                const canvasCenterY = this.canvas.height / 2;
+                this._boardOffset = { x: canvasCenterX - boardCenterX, y: canvasCenterY - boardCenterY };
+            }
+
+            regenerateMap() {
+                return this.setupBoard();
+            }
+
+            // 生成一个保证可胜利的地图（反向构造路径）
+            // 返回：逻辑坐标数组 [[rowNo,posNo,color], ...]，若生成失败返回 []
+            generateWinnableMapReverse(options = {}) {
+                // DFS/backtracking reverse path generator
+                // generateWinnableMapReverse called
+                const maxSteps = options.maxSteps || 12;
+                const maxAttempts = options.maxAttempts || 200;
+                const minDirChanges = (typeof options.minDirChanges === 'number') ? options.minDirChanges : 2;
+                const maxStraight = (typeof options.maxStraight === 'number') ? options.maxStraight : 2;
+                const allowLongJumps = !!options.allowLongJumps;
+
+                const pickColor = () => ['#A020F0','#3282FF','#FF69B4','#FFD700','#FF8C00','#DC143C'][Math.floor(Math.random()*6)];
+
+                const shuffle = (arr) => {
+                    for (let i = arr.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [arr[i], arr[j]] = [arr[j], arr[i]];
+                    }
+                    return arr;
+                };
+
+                const indexToLogical = (r, c) => {
+                    const rowNo = r + 1;
+                    const count = ROWS_LAYOUT[r];
+                    const offset = Math.floor((BOARD_COLS - count) / 2);
+                    const posNo = (c - offset) + 1;
+                    return [rowNo, posNo];
+                };
+
+                // backup and use an empty board for search
+                const oldBoard = this.board;
+                const oldBoardColors = this.boardColors;
+                const oldIndexToAxial = new Map(this.indexToAxial);
+                const oldAxialToIndex = new Map(this.axialToIndex);
+
+                this.board = this.createEmptyBoard();
+                this.boardColors = this.createEmptyColorLayer();
+                this.createAxialMapping();
+
+                const startIdx = this.logicalToIndex(17, 1);
+                if (!startIdx) {
+                    this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex; return [];
+                }
+                const startAxial = this.indexToAxial.get(`${startIdx[0]},${startIdx[1]}`);
+                if (!startAxial) { this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex; return []; }
+
+                const victoryCells = [];
+                for (let r = 0; r <= 3 && r < BOARD_ROWS; r++) {
+                    for (let c = 0; c < BOARD_COLS; c++) if (this.board[r][c] !== INVALID) victoryCells.push([r,c]);
+                }
+
+                const dirsAll = AXIAL_DIRS.slice();
+
+                // recursive DFS: try to reach startAxial from (qCur,rCur)
+                const tryFromTarget = (targetQ, targetR) => {
+                    const visited = new Set();
+                    const pathMid = [];
+                    const dirsTaken = [];
+
+                    const dfs = (qCur, rCur, depth, lastDir, straightCount) => {
+                        if (depth > maxSteps) return false;
+                        const curKey = `${qCur},${rCur}`;
+                        const startKey = `${startAxial[0]},${startAxial[1]}`;
+                        if (curKey === startKey) {
+                            return true;
+                        }
+
+                        // build candidate directions, shuffle for randomness
+                        let candidates = dirsAll.slice();
+                        shuffle(candidates);
+
+                        for (const d of candidates) {
+                            const dq = d[0], dr = d[1];
+                            const prevQ = qCur + dq * 2;
+                            const prevR = rCur + dr * 2;
+                            const midQ = qCur + dq;
+                            const midR = rCur + dr;
+                            const prevKey = `${prevQ},${prevR}`;
+                            const midKey = `${midQ},${midR}`;
+
+                            if (visited.has(prevKey)) continue;
+                            if (!this.axialToIndex.has(prevKey) || !this.axialToIndex.has(midKey)) continue;
+                            const [prevRi, prevCi] = this.axialToIndex.get(prevKey);
+                            const [midRi, midCi] = this.axialToIndex.get(midKey);
+                            if (this.board[prevRi][prevCi] !== EMPTY) continue;
+                            if (this.board[midRi][midCi] !== EMPTY) continue;
+
+                            // enforce straight constraint
+                            let newStraight = 1;
+                            if (lastDir && d[0] === lastDir[0] && d[1] === lastDir[1]) newStraight = straightCount + 1;
+                            if (newStraight > maxStraight) continue;
+
+                            // mark and descend
+                            visited.add(prevKey);
+                            const [rowNo, posNo] = indexToLogical(midRi, midCi);
+                            pathMid.push([rowNo, posNo, pickColor()]);
+                            dirsTaken.push(d);
+
+                            if (dfs(prevQ, prevR, depth+1, d, newStraight)) return true;
+
+                            // backtrack
+                            visited.delete(prevKey);
+                            pathMid.pop();
+                            dirsTaken.pop();
+                        }
+                        return false;
+                    };
+
+                    const ok = dfs(targetQ, targetR, 0, null, 0);
+                    if (ok) {
+                        const dirChanges = dirsTaken.length > 0 ? dirsTaken.reduce((acc,_,i,arr) => { if (i===0) return 0; return acc + ((arr[i][0]!==arr[i-1][0] || arr[i][1]!==arr[i-1][1])?1:0); },0) : 0;
+                        if (dirChanges < minDirChanges) return null;
+                        return pathMid.slice();
+                    }
+                    return null;
+                };
+
+                let attempts = 0;
+                while (attempts < maxAttempts) {
+                    attempts++;
+                    const [tR,tC] = victoryCells[Math.floor(Math.random()*victoryCells.length)];
+                    const tAxial = this.indexToAxial.get(`${tR},${tC}`);
+                    if (!tAxial) continue;
+                    const res = tryFromTarget(tAxial[0], tAxial[1]);
+                    if (res && res.length) {
+                        // generateWinnableMapReverse success
+                        // restore and return
+                        this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex;
+                        return res;
+                    }
+                }
+                // generateWinnableMapReverse finished without result
+                this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex;
+                return [];
             }
             
             isInside(r, c) {
@@ -677,38 +1040,46 @@
             }
             
             restart() {
-                // 清空历史记录
-                this.history = [];
-                
-                // 重置游戏状态
-                this.board = this.createEmptyBoard();
-                this.boardColors = this.createEmptyColorLayer();
-                this.setupBoard();
-                this.createAxialMapping();
-                this.moveCount = 0;
-                this.remainingPieces = 28;
-                this.gameWon = false;
-                this.selected = null;
-                
-                // 保存初始状态
-                this.saveState();
-                
-                // 隐藏胜利消息
-                document.getElementById('victoryMessage').style.display = 'none';
-                
-                // 更新UI和绘制
-                this.updateUI();
-                this.draw();
+                // 重置为当前地图的初始对局状态（使用 history[0]）
+                if (this.history && this.history.length > 0) {
+                    const initState = this.history[0];
+                    this.board = initState.board.map(row => [...row]);
+                    this.boardColors = initState.boardColors.map(row => [...row]);
+                    this.playerPos = initState.playerPos ? [...initState.playerPos] : null;
+                    this.moveCount = initState.moveCount || 0;
+                    this.remainingPieces = initState.remainingPieces || 0;
+                    this.selected = null;
+                    this.gameWon = false;
+                    // 重新创建坐标映射并绘制
+                    this.createAxialMapping();
+                    // 重置历史为仅有初始状态
+                    this.history = [
+                        {
+                            board: this.board.map(row => [...row]),
+                            boardColors: this.boardColors.map(row => [...row]),
+                            playerPos: this.playerPos ? [...this.playerPos] : null,
+                            moveCount: this.moveCount,
+                            remainingPieces: this.remainingPieces
+                        }
+                    ];
+                    // 隐藏胜利消息
+                    const vmsg = document.getElementById('victoryMessage'); if (vmsg) vmsg.style.display = 'none';
+                    this.updateUI();
+                    this.draw();
+                    return;
+                }
+
+                // 如果没有已保存的地图（极端情况），退回到完整重置并生成新地图
+                this.initGame(false);
             }
             
             getPixelPos(row, col) {
                 const CELL_SIZE = 40;
-                const X_OFFSET = this.canvas.width / 2;
-                const Y_OFFSET = 120;
-                
-                const x = X_OFFSET + (col - BOARD_COLS / 2) * CELL_SIZE + (row % 2) * (CELL_SIZE / 2);
-                const y = Y_OFFSET + row * (CELL_SIZE * 0.85);
-                return [x, y];
+                const Y_SPACING = CELL_SIZE * 0.85;
+                const baseX = (col - BOARD_COLS / 2) * CELL_SIZE + (row % 2) * (CELL_SIZE / 2);
+                const baseY = row * Y_SPACING;
+                const off = this._boardOffset || { x: this.canvas.width / 2, y: 120 };
+                return [off.x + baseX, off.y + baseY];
             }
             
             getBoardPos(px, py) {
@@ -729,6 +1100,8 @@
             
             draw() {
                 this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                // 重新计算偏移以保证在 canvas 尺寸更改时仍居中
+                this.computeBoardOffset();
                 
                 // 绘制胜利区域背景（前4行）
                 for (let r = 0; r < Math.min(4, BOARD_ROWS); r++) {
@@ -797,6 +1170,8 @@
                         }
                     }
                 }
+
+                // 已移除路径高亮功能 — 不再绘制生成路径索引
                 
                 // 显示可跳目标（全部显示为绿色）
                 if (this.selected) {
@@ -866,7 +1241,7 @@
                     oscillator.start(audioContext.currentTime);
                     oscillator.stop(audioContext.currentTime + 0.2);
                 } catch (e) {
-                    console.log("音频上下文不可用");
+                    // audio context unavailable; silently ignore
                 }
             }
             
@@ -896,7 +1271,7 @@
                         }, i * 150);
                     }
                 } catch (e) {
-                    console.log("音频上下文不可用");
+                    // audio context unavailable; silently ignore
                 }
             }
             
@@ -971,6 +1346,7 @@
                 document.getElementById('restartBtn').addEventListener('click', () => {
                     this.restart();
                 });
+                // 地图下拉已移除
             }
         }
         
@@ -978,7 +1354,129 @@
         // 初始化游戏
         // -----------------------------------------------------
         document.addEventListener('DOMContentLoaded', () => {
+            // 创建生成器 Worker（外部文件）
+            try {
+                const genWorker = new Worker('generatorWorker.js');
+                genWorker.addEventListener('message', (e) => {});
+                genWorker.addEventListener('error', (err) => {});
+                window.genWorker = genWorker;
+            } catch (err) {
+                window.genWorker = null;
+            }
+            // 地图下拉已移除；始终使用生成器生成地图
+
+            // 链接难度滑块显示
+            const diffRange = document.getElementById('difficultyRange');
+            const diffValue = document.getElementById('difficultyValue');
+            if (diffRange && diffValue) {
+                diffValue.textContent = diffRange.value;
+                diffRange.addEventListener('input', () => { diffValue.textContent = diffRange.value; });
+            }
+
             const game = new Game();
+
+            // 添加参数面板（简单实现）
+            const panelHtml = `
+                <h3 style="margin-top:0;margin-bottom:8px;">生成器参数</h3>
+                <div style="display:grid;gap:8px;">
+                    <label style="display:flex;align-items:center;gap:8px;">难度：<input id="difficultyRange" type="range" min="1" max="5" value="3" style="width:120px;"> <span id="difficultyValue">3</span></label>
+                    <label>maxSteps: <input id="opt_maxSteps" type="number" min="4" max="48" value="12" style="width:100%;"></label>
+                    <label>maxAttempts: <input id="opt_maxAttempts" type="number" min="50" max="2000" value="200" style="width:100%;"></label>
+                    <label>minDirChanges: <input id="opt_minDirChanges" type="number" min="1" max="6" value="1" style="width:100%;"></label>
+                    <label>maxStraight: <input id="opt_maxStraight" type="number" min="1" max="6" value="2" style="width:100%;"></label>
+                    <label>decorationDensity: <input id="opt_decorationDensity" type="number" step="0.01" min="0" max="0.2" value="0.04" style="width:100%;"></label>
+                    <label style="display:flex;align-items:center;gap:8px;"><input id="opt_allowLongJumps" type="checkbox"> 允许长跳</label>
+                </div>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button id="panelApplyBtn" style="flex:1;">应用</button>
+                    <button id="panelResetBtn" style="flex:1;">快速重置</button>
+                </div>
+            `;
+            const panel = document.createElement('div');
+            panel.className = 'panel';
+            panel.innerHTML = panelHtml;
+            // 将面板与 container 放入同一水平行并居中显示
+            const oldContainer = document.querySelector('.container');
+            const layoutRow = document.createElement('div');
+            layoutRow.className = 'layout-row';
+            if (oldContainer && oldContainer.parentNode) {
+                oldContainer.parentNode.insertBefore(layoutRow, oldContainer);
+                layoutRow.appendChild(panel);
+                layoutRow.appendChild(oldContainer);
+            } else {
+                // 若不存在 container，则将 panel 单独插入
+                document.body.insertBefore(panel, document.body.firstChild);
+            }
+
+            // 默认 applied options
+            window.appliedGeneratorOptions = null;
+
+            const collectOptionsFromPanel = () => {
+                const get = (id, parseFn, fallback) => { const el = document.getElementById(id); if (!el) return fallback; const v = el.value; return parseFn ? parseFn(v) : v; };
+                const opts = {
+                    maxSteps: get('opt_maxSteps', v=>parseInt(v,10), 12),
+                    maxAttempts: get('opt_maxAttempts', v=>parseInt(v,10), 200),
+                    minDirChanges: get('opt_minDirChanges', v=>parseInt(v,10), 1),
+                    maxStraight: get('opt_maxStraight', v=>parseInt(v,10), 2),
+                    decorationDensity: get('opt_decorationDensity', v=>parseFloat(v), 0.04),
+                    allowLongJumps: document.getElementById('opt_allowLongJumps') ? document.getElementById('opt_allowLongJumps').checked : false
+                };
+                return opts;
+            };
+
+            // Apply / Reset bindings
+            const applyBtn = document.getElementById('panelApplyBtn');
+            const resetBtn = document.getElementById('panelResetBtn');
+            const applyDefaults = () => {
+                document.getElementById('opt_maxSteps').value = 12;
+                document.getElementById('opt_maxAttempts').value = 200;
+                document.getElementById('opt_minDirChanges').value = 1;
+                document.getElementById('opt_maxStraight').value = 2;
+                document.getElementById('opt_decorationDensity').value = 0.04;
+                document.getElementById('opt_allowLongJumps').checked = false;
+            };
+            applyDefaults();
+
+            if (applyBtn) {
+                applyBtn.addEventListener('click', () => {
+                    window.appliedGeneratorOptions = collectOptionsFromPanel();
+                    // 应用但不生成
+                    showToast('参数已应用（请点击“重新生成地图”）', { type: 'info', duration: 1800 });
+                });
+            }
+            if (resetBtn) {
+                // 将 panelResetBtn 的行为设为“保存当前参数以生成地图"
+                resetBtn.addEventListener('click', () => {
+                    window.appliedGeneratorOptions = collectOptionsFromPanel();
+                    showToast('参数已保存（请点击“重新生成地图”）', { type: 'info', duration: 1600 });
+                });
+            }
+            // 初始化当前 regen toast id
+            window.currentRegenToastId = null;
+
+            // 绑定重新生成按钮（使用已应用的参数）
+            const regenBtn = document.getElementById('regenBtn');
+            if (regenBtn) {
+                regenBtn.addEventListener('click', async () => {
+                    try {
+                        regenBtn.disabled = true;
+                        const toastId = showToast('正在生成新地图', { type: 'info', persist: true });
+                        window.currentRegenToastId = toastId;
+                        // 使用全局 appliedGeneratorOptions（通过面板的“应用”设置）
+                        const opts = window.appliedGeneratorOptions || null;
+                        await game.regenerateMap(opts);
+                        if (toastId) hideToast(toastId);
+                        showToast('地图已生成', { type: 'success', duration: 2600 });
+                    } catch (err) {
+                        if (window.currentRegenToastId) hideToast(window.currentRegenToastId);
+                        showToast('生成失败，请重试', { type: 'error', duration: 3200 });
+                    } finally {
+                        regenBtn.disabled = false;
+                        window.currentRegenToastId = null;
+                    }
+                });
+            }
+            // removed quickResetBtn: no control-level quick reset per request
         });
     </script>
 </body>
