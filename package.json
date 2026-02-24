@@ -1,0 +1,17 @@
+{
+  "name": "checkers-game-server",
+  "version": "1.0.0",
+  "description": "Standalone HTTP server for Checkers Game",
+  "main": "server.js",
+  "bin": "server.js",
+  "scripts": {
+    "build": "pkg . --targets node18-win-x64 --output checkers-server.exe"
+  },
+  "pkg": {
+    "assets": [
+      "index.html",
+      "generatorWorker.js"
+    ]
+  },
+  "dependencies": {}
+}

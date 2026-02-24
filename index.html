@@ -289,29 +289,23 @@
         <h1>跳棋游戏</h1>
     </header>
     
-    <!-- 静态面板：生成器参数（已从脚本内联出） -->
+    <!-- 静态面板：生成器参数 -->
     <div class="layout-row">
     <div class="panel">
-        <h3 style="margin-top:0;margin-bottom:8px;">生成器参数</h3>
+        <h3 style="margin-top:0;margin-bottom:8px;">游戏设置</h3>
         <div style="display:grid;gap:8px;">
-            <label style="display:flex;align-items:center;gap:8px;">难度：<input id="difficultyRange" type="range" min="1" max="5" value="3" style="width:120px;"> <span id="difficultyValue">3</span></label>
-            <label style="display:flex;align-items:center;gap:8px;">方向偏好：<input id="opt_directionBias" type="range" min="-1" max="1" step="0.1" value="0" style="width:120px;"><span id="opt_directionBiasValue">0</span></label>
-            <label style="display:flex;align-items:center;gap:8px;">分支概率：<input id="opt_branchChance" type="range" min="0" max="0.2" step="0.01" value="0.08" style="width:120px;"><span id="opt_branchChanceValue">0.08</span></label>
-            <label style="display:flex;align-items:center;gap:8px;">径向偏好：<input id="opt_radialBias" type="range" min="-1" max="1" step="0.01" value="0.08" style="width:120px;"><span id="opt_radialBiasValue">0.08</span></label>
-            <label>maxSteps: <input id="opt_maxSteps" type="number" min="4" max="120" value="12" style="width:100%;"></label>
-            <label>maxAttempts: <input id="opt_maxAttempts" type="number" min="50" max="20000" value="200" style="width:100%;"></label>
-            <label>minDirChanges: <input id="opt_minDirChanges" type="number" min="0" max="12" value="1" style="width:100%;"></label>
-            <label>maxStraight: <input id="opt_maxStraight" type="number" min="1" max="12" value="2" style="width:100%;"></label>
-            <!-- decorationDensity removed -->
-            <label style="display:flex;align-items:center;gap:8px;"><input id="opt_allowLongJumps" type="checkbox"> 允许长跳</label>
-            <label>maxFactor: <select id="opt_maxFactor" style="width:100%;"><option value="2">2</option><option value="4">4</option><option value="6">6</option><option value="8" selected>8</option></select></label>
-            <label>最小决策点数: <input id="opt_minDecisionPoints" type="number" min="0" max="6" value="4" style="width:100%;"></label>
-            <label>决策点最小间隔: <input id="opt_decisionSeparation" type="number" min="1" max="12" value="2" style="width:100%;"></label>
-            <label>每决策点最少备选数: <input id="opt_minAlternatives" type="number" min="1" max="5" value="3" style="width:100%;"></label>
+            <label style="display:flex;align-items:center;gap:8px;">难度等级：<input id="difficultyRange" type="range" min="1" max="4" value="2" style="width:120px;"> <span id="difficultyValue">2</span></label>
+            <div style="font-size: 0.85rem; color: #666; margin-bottom: 10px;">
+                1: 简单 (稀疏, 无长跳)<br>
+                2: 中等 (适度分支, 短长跳)<br>
+                3: 困难 (密集, 多分支, 中长跳)<br>
+                4: 极难 (迷宫, 极度拥挤, 极限长跳)
+            </div>
+            <label style="display:flex;align-items:center;gap:8px;">倒计时(秒)：<input id="timerInput" type="number" min="3" max="60" value="10" style="width:60px;"></label>
+            <label style="display:flex;align-items:center;gap:8px;">初始分数：<input id="initialScoreInput" type="number" min="0" max="1000" value="100" style="width:80px;"></label>
         </div>
         <div style="display:flex;gap:8px;margin-top:10px;">
             <button id="panelApplyBtn" style="flex:1;">应用</button>
-            <button id="panelResetBtn" style="flex:1;">快速重置</button>
         </div>
     </div>
     
@@ -341,6 +335,14 @@
                 <div class="stat-item">
                     <div class="stat-label">剩余棋子</div>
                     <div class="stat-value" id="remainingPieces">28</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">当前分数</div>
+                    <div class="stat-value" id="currentScore">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">落子倒计时</div>
+                    <div class="stat-value" id="countdownTimer">00:00</div>
                 </div>
             </div>
         </div>
@@ -428,6 +430,13 @@
                 this.history = [];
                 this.gameWon = false;
                 this.remainingPieces = 28;
+                this.countdownTimerId = null;
+                this.timerSeconds = 10;
+                this.timeLeft = this.timerSeconds;
+                this.initialScore = 100;
+                this.currentScore = this.initialScore;
+                
+                this.applyPanelSettings(window.appliedGeneratorOptions || {});
                 
                 this.initGame(true);
                 this.setupEventListeners();
@@ -447,6 +456,8 @@
                 this.remainingPieces = 28;
                 this.gameWon = false;
                 this.selected = null;
+                this.stopCountdown();
+                this.applyPanelSettings(window.appliedGeneratorOptions || {});
             }
             
             createEmptyBoard() {
@@ -464,6 +475,87 @@
             
             createEmptyColorLayer() {
                 return Array(BOARD_ROWS).fill().map(() => Array(BOARD_COLS).fill(null));
+            }
+            
+            normalizeTimerSeconds(val) {
+                const parsed = parseInt(val, 10);
+                if (!Number.isFinite(parsed)) return 10;
+                return Math.min(60, Math.max(3, parsed));
+            }
+            
+            normalizeInitialScore(val) {
+                const parsed = parseInt(val, 10);
+                if (!Number.isFinite(parsed)) return 100;
+                return Math.max(0, parsed);
+            }
+            
+            applyPanelSettings(panelOpts = {}) {
+                this.timerSeconds = this.normalizeTimerSeconds(panelOpts.timerSeconds);
+                this.initialScore = this.normalizeInitialScore(panelOpts.initialScore);
+                this.currentScore = this.initialScore;
+                this.timeLeft = this.timerSeconds;
+                this.updateTimerUI();
+                this.updateUI();
+            }
+            
+            adjustScore(delta) {
+                const next = (this.currentScore || 0) + delta;
+                this.currentScore = Math.max(0, Math.round(next));
+                this.updateUI();
+            }
+
+            applyUndoPenalty() {
+                const penalty = 5;
+                this.adjustScore(-penalty);
+                showToast(`撤销一步，-${penalty}分`, { type: 'info', duration: 2400 });
+            }
+            
+            startCountdown() {
+                this.stopCountdown();
+                if (this.gameWon) return;
+                
+                const initialTime = this.timerSeconds || 10;
+                this.timeLeft = initialTime;
+                this.updateTimerUI();
+                
+                this.countdownTimerId = setInterval(() => {
+                    this.timeLeft--;
+                    this.updateTimerUI();
+                    
+                    if (this.timeLeft <= 0) {
+                        this.triggerFoul();
+                    }
+                }, 1000);
+            }
+            
+            stopCountdown() {
+                if (this.countdownTimerId) {
+                    clearInterval(this.countdownTimerId);
+                    this.countdownTimerId = null;
+                }
+            }
+            
+            updateTimerUI() {
+                const timerEl = document.getElementById('countdownTimer');
+                if (timerEl) {
+                    const secs = Math.max(0, this.timeLeft);
+                    timerEl.textContent = `00:${secs.toString().padStart(2, '0')}`;
+                    if (secs <= 3) {
+                        timerEl.style.color = '#e74c3c'; // 红色警告
+                    } else {
+                        timerEl.style.color = ''; // 默认颜色
+                    }
+                }
+            }
+            
+            triggerFoul() {
+                this.stopCountdown();
+                const penalty = 5;
+                this.adjustScore(-penalty);
+                showToast(`落子超时，-${penalty}分`, { type: 'error', duration: 3200 });
+                this.startCountdown();
+                // 可选：播放犯规音效
+                // this.playFoulSound();
             }
             
             logicalToIndex(rowNo, posNo) {
@@ -491,7 +583,9 @@
                     maxAttempts: 200,
                     minDirChanges: Math.max(1, diff),
                     maxStraight: Math.max(1, 3 - Math.floor((diff-1)/2)),
-                    allowLongJumps: false
+                    allowLongJumps: false,
+                    timerSeconds: this.timerSeconds || 10,
+                    initialScore: this.initialScore || 100
                 };
                 // merge applied / incoming options (appliedGeneratorOptions overrides defaults)
                 const options = Object.assign({}, defaultOptions, window.appliedGeneratorOptions || inputOptions || {});
@@ -523,6 +617,7 @@
 
                     this.createAxialMapping();
                     this.moveCount = 0;
+                    this.applyPanelSettings(options || {});
                     // 将当前生成的地图设为新的初始状态：重置历史为仅包含此状态
                     const initState = {
                         board: this.board.map(row => [...row]),
@@ -534,6 +629,7 @@
                     this.history = [initState];
                     this.updateUI();
                     this.draw();
+                    this.startCountdown();
                 };
 
                 // 如果有 worker，则异步生成
@@ -557,24 +653,8 @@
                             if (spinner) spinner.style.display = 'none';
                             worker.removeEventListener('message', handler);
                             const obstacles = d.obstacles || [];
-                            if (obstacles.length === 0) {
-                                // worker returned empty obstacles, falling back to sync generator
-                                // 如果 worker 未生成有效地图，回退到主线程生成器
-                                if (typeof this.generateWinnableMapReverse === 'function') {
-                                        const fallback = this.generateWinnableMapReverse(options) || [];
-                                    applyObstacles(fallback);
-                                    if (spinner) spinner.style.display = 'none';
-                                    resolve(fallback);
-                                } else {
-                                    applyObstacles([]);
-                                    if (spinner) spinner.style.display = 'none';
-                                    resolve([]);
-                                }
-                            } else {
-                                applyObstacles(obstacles);
-                                if (spinner) spinner.style.display = 'none';
-                                resolve(obstacles);
-                            }
+                            applyObstacles(obstacles);
+                            resolve(obstacles);
                             return;
                         }
 
@@ -582,17 +662,8 @@
                             // worker error
                             if (spinner) spinner.style.display = 'none';
                             worker.removeEventListener('message', handler);
-                            // 回退到同步生成器
-                                if (typeof this.generateWinnableMapReverse === 'function') {
-                                const fallback = this.generateWinnableMapReverse(options) || [];
-                                applyObstacles(fallback, []);
-                                if (spinner) spinner.style.display = 'none';
-                                resolve(fallback);
-                            } else {
-                                applyObstacles([], []);
-                                if (spinner) spinner.style.display = 'none';
-                                resolve([]);
-                            }
+                            applyObstacles([]);
+                            resolve([]);
                         }
                     };
 
@@ -600,37 +671,19 @@
                     try {
                         worker.postMessage({ cmd: 'generate', options, rowsLayout: ROWS_LAYOUT, boardCols: BOARD_COLS, requestId });
                     } catch (err) {
-                        // Worker postMessage failed, falling back to sync generator
+                        // Worker postMessage failed
                         worker.removeEventListener('message', handler);
-                        if (typeof this.generateWinnableMapReverse === 'function') {
-                            const fallback = this.generateWinnableMapReverse(options) || [];
-                            applyObstacles(fallback, []);
-                            if (spinner) spinner.style.display = 'none';
-                            resolve(fallback);
-                        } else {
-                            applyObstacles([], []);
-                            if (spinner) spinner.style.display = 'none';
-                            resolve([]);
-                        }
+                        applyObstacles([]);
+                        if (spinner) spinner.style.display = 'none';
+                        resolve([]);
                     }
                     return;
                 }
 
-                // 无 Worker：同步生成（回退）
-                let obstaclesToUse = [];
-                if (typeof this.generateWinnableMapReverse === 'function') {
-                    const generated = this.generateWinnableMapReverse(options);
-                    if (generated && generated.length) {
-                        obstaclesToUse = generated;
-                    } else {
-                        // generator failed to produce a valid map
-                        obstaclesToUse = [];
-                    }
-                }
-
-                applyObstacles(obstaclesToUse, []);
+                // 无 Worker：直接返回空地图
+                applyObstacles([]);
                 if (document.getElementById('genSpinner')) document.getElementById('genSpinner').style.display = 'none';
-                resolve(obstaclesToUse);
+                resolve([]);
                 });
             }
             
@@ -685,185 +738,6 @@
 
             regenerateMap(options) {
                 return this.setupBoard(options);
-            }
-
-            // 生成一个保证可胜利的地图（反向构造路径）
-            // 返回：逻辑坐标数组 [[rowNo,posNo,color], ...]，若生成失败返回 []
-            generateWinnableMapReverse(options = {}) {
-                // DFS/backtracking reverse path generator
-                // generateWinnableMapReverse called
-                const maxSteps = options.maxSteps || 12;
-                const maxAttempts = options.maxAttempts || 200;
-                const minDirChanges = (typeof options.minDirChanges === 'number') ? options.minDirChanges : 2;
-                const maxStraight = (typeof options.maxStraight === 'number') ? options.maxStraight : 2;
-                const allowLongJumps = !!options.allowLongJumps;
-
-                const pickColor = () => ['#A020F0','#3282FF','#FF69B4','#FFD700','#FF8C00','#DC143C'][Math.floor(Math.random()*6)];
-
-                const shuffle = (arr) => {
-                    for (let i = arr.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [arr[i], arr[j]] = [arr[j], arr[i]];
-                    }
-                    return arr;
-                };
-
-                const indexToLogical = (r, c) => {
-                    const rowNo = r + 1;
-                    const count = ROWS_LAYOUT[r];
-                    const offset = Math.floor((BOARD_COLS - count) / 2);
-                    const posNo = (c - offset) + 1;
-                    return [rowNo, posNo];
-                };
-
-                // backup and use an empty board for search
-                const oldBoard = this.board;
-                const oldBoardColors = this.boardColors;
-                const oldIndexToAxial = new Map(this.indexToAxial);
-                const oldAxialToIndex = new Map(this.axialToIndex);
-
-                this.board = this.createEmptyBoard();
-                this.boardColors = this.createEmptyColorLayer();
-                this.createAxialMapping();
-
-                const startIdx = this.logicalToIndex(17, 1);
-                if (!startIdx) {
-                    this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex; return [];
-                }
-                const startAxial = this.indexToAxial.get(`${startIdx[0]},${startIdx[1]}`);
-                if (!startAxial) { this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex; return []; }
-
-                const victoryCells = [];
-                for (let r = 0; r <= 3 && r < BOARD_ROWS; r++) {
-                    for (let c = 0; c < BOARD_COLS; c++) if (this.board[r][c] !== INVALID) victoryCells.push([r,c]);
-                }
-
-                const dirsAll = AXIAL_DIRS.slice();
-                const directionBias = (typeof options.directionBias === 'number') ? options.directionBias : 0;
-                const radialBias = (typeof options.radialBias === 'number') ? options.radialBias : 0;
-
-                // recursive DFS: try to reach startAxial from (qCur,rCur)
-                const tryFromTarget = (targetQ, targetR) => {
-                    const visited = new Set();
-                    const pathMid = [];
-                    const dirsTaken = [];
-
-                    const dfs = (qCur, rCur, depth, lastDir, straightCount) => {
-                        if (depth > maxSteps) return false;
-                        const curKey = `${qCur},${rCur}`;
-                        const startKey = `${startAxial[0]},${startAxial[1]}`;
-                        if (curKey === startKey) {
-                            return true;
-                        }
-
-                        // build candidate directions with weighted preference (directionBias + radialBias)
-                        // compute map center for radial bias
-                        let centerQ = 0, centerR = 0, cnt = 0;
-                        for (const k of this.axialToIndex.keys()) {
-                            const [qStr, rStr] = k.split(',');
-                            centerQ += parseInt(qStr, 10);
-                            centerR += parseInt(rStr, 10);
-                            cnt++;
-                        }
-                        if (cnt > 0) { centerQ /= cnt; centerR /= cnt; }
-
-                        // base weights and group bias
-                        const weights = new Array(dirsAll.length).fill(1);
-                        const bias = Math.max(-1, Math.min(1, directionBias));
-                        if (bias > 0) {
-                            [0,3].forEach(i=>weights[i]=1+bias);
-                            [1,4].forEach(i=>weights[i]=1-bias*0.3);
-                            [2,5].forEach(i=>weights[i]=1-bias*0.3);
-                        } else if (bias < 0) {
-                            [2,5].forEach(i=>weights[i]=1+Math.abs(bias));
-                            [0,3].forEach(i=>weights[i]=1-Math.abs(bias)*0.3);
-                            [1,4].forEach(i=>weights[i]=1-Math.abs(bias)*0.3);
-                        }
-
-                        if (radialBias && Math.abs(radialBias) > 1e-6) {
-                            const radialX = qCur - centerQ;
-                            const radialY = rCur - centerR;
-                            const radialLen = Math.sqrt(radialX*radialX + radialY*radialY) || 1;
-                            for (let di=0; di<dirsAll.length; di++) {
-                                const dir = dirsAll[di];
-                                const dirLen = Math.sqrt(dir[0]*dir[0] + dir[1]*dir[1]) || 1;
-                                const dot = (radialX*dir[0] + radialY*dir[1])/(radialLen*dirLen);
-                                weights[di] = Math.max(0.001, weights[di] * (1 + radialBias * dot));
-                            }
-                        }
-
-                        // softmax normalization
-                        const temp = Math.max(0.3, 1 - Math.abs(bias) * 0.6);
-                        const exps = weights.map(w => Math.exp(w / temp));
-                        const sumExp = exps.reduce((s,v)=>s+v,0) || 1;
-                        const probs = exps.map(v => v / sumExp);
-                        // order indices by descending probability
-                        const order = probs.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0]).map(x=>x[1]);
-
-                        for (const idx of order) {
-                            const d = dirsAll[idx];
-                            const dq = d[0], dr = d[1];
-                            const prevQ = qCur + dq * 2;
-                            const prevR = rCur + dr * 2;
-                            const midQ = qCur + dq;
-                            const midR = rCur + dr;
-                            const prevKey = `${prevQ},${prevR}`;
-                            const midKey = `${midQ},${midR}`;
-
-                            if (visited.has(prevKey)) continue;
-                            if (!this.axialToIndex.has(prevKey) || !this.axialToIndex.has(midKey)) continue;
-                            const [prevRi, prevCi] = this.axialToIndex.get(prevKey);
-                            const [midRi, midCi] = this.axialToIndex.get(midKey);
-                            if (this.board[prevRi][prevCi] !== EMPTY) continue;
-                            if (this.board[midRi][midCi] !== EMPTY) continue;
-
-                            // enforce straight constraint
-                            let newStraight = 1;
-                            if (lastDir && d[0] === lastDir[0] && d[1] === lastDir[1]) newStraight = straightCount + 1;
-                            if (newStraight > maxStraight) continue;
-
-                            // mark and descend
-                            visited.add(prevKey);
-                            const [rowNo, posNo] = indexToLogical(midRi, midCi);
-                            pathMid.push([rowNo, posNo, pickColor()]);
-                            dirsTaken.push(d);
-
-                            if (dfs(prevQ, prevR, depth+1, d, newStraight)) return true;
-
-                            // backtrack
-                            visited.delete(prevKey);
-                            pathMid.pop();
-                            dirsTaken.pop();
-                        }
-                        return false;
-                    };
-
-                    const ok = dfs(targetQ, targetR, 0, null, 0);
-                    if (ok) {
-                        const dirChanges = dirsTaken.length > 0 ? dirsTaken.reduce((acc,_,i,arr) => { if (i===0) return 0; return acc + ((arr[i][0]!==arr[i-1][0] || arr[i][1]!==arr[i-1][1])?1:0); },0) : 0;
-                        if (dirChanges < minDirChanges) return null;
-                        return pathMid.slice();
-                    }
-                    return null;
-                };
-
-                let attempts = 0;
-                while (attempts < maxAttempts) {
-                    attempts++;
-                    const [tR,tC] = victoryCells[Math.floor(Math.random()*victoryCells.length)];
-                    const tAxial = this.indexToAxial.get(`${tR},${tC}`);
-                    if (!tAxial) continue;
-                    const res = tryFromTarget(tAxial[0], tAxial[1]);
-                    if (res && res.length) {
-                        // generateWinnableMapReverse success
-                        // restore and return
-                        this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex;
-                        return res;
-                    }
-                }
-                // generateWinnableMapReverse finished without result
-                this.board = oldBoard; this.boardColors = oldBoardColors; this.indexToAxial = oldIndexToAxial; this.axialToIndex = oldAxialToIndex;
-                return [];
             }
             
             isInside(r, c) {
@@ -1049,8 +923,12 @@
                 // 检查胜利
                 if (this.checkWin()) {
                     this.playVictorySound();
+                    this.stopCountdown();
                     return true;
                 }
+                
+                // 成功落子，重置倒计时
+                this.startCountdown();
                 
                 return true;
             }
@@ -1107,6 +985,8 @@
                     document.getElementById('victoryMessage').style.display = 'none';
                     this.gameWon = false;
                     
+                    this.startCountdown();
+                    
                     this.updateUI();
                     return true;
                 }
@@ -1138,7 +1018,11 @@
                     ];
                     // 隐藏胜利消息
                     const vmsg = document.getElementById('victoryMessage'); if (vmsg) vmsg.style.display = 'none';
-                    this.updateUI();
+                    
+                    // 在不改变地图的情况下应用最新面板参数（倒计时/初始分数）
+                    const latestOpts = Object.assign({}, window.appliedGeneratorOptions || {});
+                    this.applyPanelSettings(latestOpts);
+                    this.startCountdown();
                     this.draw();
                     return;
                 }
@@ -1350,8 +1234,12 @@
             }
             
             updateUI() {
-                document.getElementById('moveCount').textContent = this.moveCount;
-                document.getElementById('remainingPieces').textContent = this.remainingPieces;
+                const moveEl = document.getElementById('moveCount');
+                if (moveEl) moveEl.textContent = this.moveCount;
+                const remainingEl = document.getElementById('remainingPieces');
+                if (remainingEl) remainingEl.textContent = this.remainingPieces;
+                const scoreEl = document.getElementById('currentScore');
+                if (scoreEl) scoreEl.textContent = this.currentScore;
             }
             
             setupEventListeners() {
@@ -1400,7 +1288,10 @@
                 document.addEventListener('keydown', (e) => {
                     if (e.ctrlKey && e.key === 'z') {
                         e.preventDefault();
-                        this.undo();
+                        const undone = this.undo();
+                        if (undone) {
+                            this.applyUndoPenalty();
+                        }
                         this.draw();
                     } else if (e.ctrlKey && e.key === 'r') {
                         e.preventDefault();
@@ -1413,7 +1304,10 @@
                 
                 // 按钮事件
                 document.getElementById('undoBtn').addEventListener('click', () => {
-                    this.undo();
+                    const undone = this.undo();
+                    if (undone) {
+                        this.applyUndoPenalty();
+                    }
                     this.draw();
                 });
                 
@@ -1443,106 +1337,64 @@
             const diffRange = document.getElementById('difficultyRange');
             const diffValue = document.getElementById('difficultyValue');
             if (diffRange && diffValue) {
-                diffValue.textContent = diffRange.value;
-                diffRange.addEventListener('input', () => { diffValue.textContent = diffRange.value; });
+                const updateLabel = (val) => {
+                    let label = '';
+                    switch(parseInt(val, 10)) {
+                        case 1: label = '简单 (1)'; break;
+                        case 2: label = '普通 (2)'; break;
+                        case 3: label = '困难 (3)'; break;
+                        case 4: label = '极难 (4)'; break;
+                        default: label = val;
+                    }
+                    diffValue.textContent = label;
+                };
+                updateLabel(diffRange.value);
+                diffRange.addEventListener('input', () => { updateLabel(diffRange.value); });
             }
-
-            // directionBias display link
-            const dbRange = document.getElementById('opt_directionBias');
-            const dbValue = document.getElementById('opt_directionBiasValue');
-            if (dbRange && dbValue) {
-                dbValue.textContent = dbRange.value;
-                dbRange.addEventListener('input', () => { dbValue.textContent = dbRange.value; });
-            }
-
-            // branchChance display link
-            const bcRange = document.getElementById('opt_branchChance');
-            const bcValue = document.getElementById('opt_branchChanceValue');
-            if (bcRange && bcValue) {
-                bcValue.textContent = bcRange.value;
-                bcRange.addEventListener('input', () => { bcValue.textContent = bcRange.value; });
-            }
-
-            // radialBias display link
-            const rbRange = document.getElementById('opt_radialBias');
-            const rbValue = document.getElementById('opt_radialBiasValue');
-            if (rbRange && rbValue) {
-                rbValue.textContent = rbRange.value;
-                rbRange.addEventListener('input', () => { rbValue.textContent = rbRange.value; });
-            }
-
-            const game = new Game();
-
-            // 面板已静态化到 HTML（位于 container 之前）
-
-            // 默认 applied options
-            window.appliedGeneratorOptions = null;
 
             const collectOptionsFromPanel = () => {
                 const get = (id, parseFn, fallback) => { const el = document.getElementById(id); if (!el) return fallback; const v = el.value; return parseFn ? parseFn(v) : v; };
                 const opts = {
-                    maxSteps: get('opt_maxSteps', v=>parseInt(v,10), 12),
-                    maxAttempts: get('opt_maxAttempts', v=>parseInt(v,10), 400),
-                    minDirChanges: get('opt_minDirChanges', v=>parseInt(v,10), 2),
-                    maxStraight: get('opt_maxStraight', v=>parseInt(v,10), 1),
-                    minDecisionPoints: get('opt_minDecisionPoints', v=>parseInt(v,10), 2),
-                    decisionSeparation: get('opt_decisionSeparation', v=>parseInt(v,10), 3),
-                    minAlternatives: get('opt_minAlternatives', v=>parseInt(v,10), 2),
-                    // decorationDensity removed
-                    allowLongJumps: document.getElementById('opt_allowLongJumps') ? document.getElementById('opt_allowLongJumps').checked : true,
-                    maxFactor: get('opt_maxFactor', v=>parseInt(v,10), 6),
-                    directionBias: get('opt_directionBias', v=>parseFloat(v), 0),
-                    branchChance: get('opt_branchChance', v=>parseFloat(v), 0.08),
-                    radialBias: get('opt_radialBias', v=>parseFloat(v), 0.08)
+                    difficulty: get('difficultyRange', v=>parseInt(v,10), 2),
+                    timerSeconds: get('timerInput', v=>parseInt(v,10), 10),
+                    initialScore: get('initialScoreInput', v=>parseInt(v,10), 100)
                 };
                 return opts;
             };
 
             // Apply / Reset bindings
             const applyBtn = document.getElementById('panelApplyBtn');
-            const resetBtn = document.getElementById('panelResetBtn');
             const applyDefaults = () => {
-                // Stronger/aggressive defaults
-                document.getElementById('difficultyRange').value = 5;
-                const diffSpan = document.getElementById('difficultyValue'); if (diffSpan) diffSpan.textContent = 5;
-                document.getElementById('opt_maxSteps').value = 18;
-                document.getElementById('opt_maxAttempts').value = 2000;
-                document.getElementById('opt_minDirChanges').value = 1;
-                document.getElementById('opt_maxStraight').value = 1;
-                // decorationDensity removed
-                document.getElementById('opt_allowLongJumps').checked = true;
-                document.getElementById('opt_maxFactor').value = 8;
-                // direction bias: keep neutral to allow branches
-                document.getElementById('opt_directionBias').value = 0.0;
-                const dbVal = document.getElementById('opt_directionBias').value; const dbSpan = document.getElementById('opt_directionBiasValue'); if (dbSpan) dbSpan.textContent = dbVal;
-                // branchChance / radialBias defaults (made more aggressive)
-                if (document.getElementById('opt_branchChance')) document.getElementById('opt_branchChance').value = 0.35;
-                const bcSpan = document.getElementById('opt_branchChanceValue'); if (bcSpan) bcSpan.textContent = document.getElementById('opt_branchChance').value;
-                if (document.getElementById('opt_radialBias')) document.getElementById('opt_radialBias').value = 0.4;
-                const rbSpan = document.getElementById('opt_radialBiasValue'); if (rbSpan) rbSpan.textContent = document.getElementById('opt_radialBias').value;
-                if (document.getElementById('opt_allowLongJumps')) document.getElementById('opt_allowLongJumps').checked = true;
-                // new decision UI defaults
-                if (document.getElementById('opt_minDecisionPoints')) document.getElementById('opt_minDecisionPoints').value = 2;
-                if (document.getElementById('opt_decisionSeparation')) document.getElementById('opt_decisionSeparation').value = 3;
-                if (document.getElementById('opt_minAlternatives')) document.getElementById('opt_minAlternatives').value = 2;
+                // Default to Normal difficulty
+                const diffRange = document.getElementById('difficultyRange');
+                if (diffRange) {
+                    diffRange.value = 2;
+                    // trigger input event to update label
+                    diffRange.dispatchEvent(new Event('input'));
+                }
+                const timerInput = document.getElementById('timerInput');
+                if (timerInput) {
+                    timerInput.value = 10;
+                }
+                const scoreInput = document.getElementById('initialScoreInput');
+                if (scoreInput) {
+                    scoreInput.value = 100;
+                }
             };
             applyDefaults();
 
             // 保存为已应用的激进默认参数，页面加载后直接使用这些激进默认值
             window.appliedGeneratorOptions = collectOptionsFromPanel();
 
+            const game = new Game();
+
+            // 面板已静态化到 HTML（位于 container 之前）
+
             if (applyBtn) {
                 applyBtn.addEventListener('click', () => {
                     window.appliedGeneratorOptions = collectOptionsFromPanel();
                     // 应用但不生成
                     showToast('参数已应用（请点击“重新生成地图”）', { type: 'info', duration: 1800 });
-                });
-            }
-            if (resetBtn) {
-                // 将 panelResetBtn 的行为设为“保存当前参数以生成地图"
-                resetBtn.addEventListener('click', () => {
-                    window.appliedGeneratorOptions = collectOptionsFromPanel();
-                    showToast('参数已保存（请点击“重新生成地图”）', { type: 'info', duration: 1600 });
                 });
             }
             // 初始化当前 regen toast id
@@ -1554,7 +1406,7 @@
                 regenBtn.addEventListener('click', async () => {
                     try {
                         regenBtn.disabled = true;
-                        // 隐藏可能存在的胜利提示，清除 game 的胜利标志
+                        // 隐藏可能存在的胜利提示和犯规提示，清除 game 的标志
                         if (typeof game !== 'undefined' && game) {
                             game.gameWon = false;
                             const vmsg = document.getElementById('victoryMessage');
