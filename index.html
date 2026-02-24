@@ -289,6 +289,32 @@
         <h1>跳棋游戏</h1>
     </header>
     
+    <!-- 静态面板：生成器参数（已从脚本内联出） -->
+    <div class="layout-row">
+    <div class="panel">
+        <h3 style="margin-top:0;margin-bottom:8px;">生成器参数</h3>
+        <div style="display:grid;gap:8px;">
+            <label style="display:flex;align-items:center;gap:8px;">难度：<input id="difficultyRange" type="range" min="1" max="5" value="3" style="width:120px;"> <span id="difficultyValue">3</span></label>
+            <label style="display:flex;align-items:center;gap:8px;">方向偏好：<input id="opt_directionBias" type="range" min="-1" max="1" step="0.1" value="0" style="width:120px;"><span id="opt_directionBiasValue">0</span></label>
+            <label style="display:flex;align-items:center;gap:8px;">分支概率：<input id="opt_branchChance" type="range" min="0" max="0.2" step="0.01" value="0.08" style="width:120px;"><span id="opt_branchChanceValue">0.08</span></label>
+            <label style="display:flex;align-items:center;gap:8px;">径向偏好：<input id="opt_radialBias" type="range" min="-1" max="1" step="0.01" value="0.08" style="width:120px;"><span id="opt_radialBiasValue">0.08</span></label>
+            <label>maxSteps: <input id="opt_maxSteps" type="number" min="4" max="120" value="12" style="width:100%;"></label>
+            <label>maxAttempts: <input id="opt_maxAttempts" type="number" min="50" max="20000" value="200" style="width:100%;"></label>
+            <label>minDirChanges: <input id="opt_minDirChanges" type="number" min="0" max="12" value="1" style="width:100%;"></label>
+            <label>maxStraight: <input id="opt_maxStraight" type="number" min="1" max="12" value="2" style="width:100%;"></label>
+            <!-- decorationDensity removed -->
+            <label style="display:flex;align-items:center;gap:8px;"><input id="opt_allowLongJumps" type="checkbox"> 允许长跳</label>
+            <label>maxFactor: <select id="opt_maxFactor" style="width:100%;"><option value="2">2</option><option value="4">4</option><option value="6">6</option><option value="8" selected>8</option></select></label>
+            <label>最小决策点数: <input id="opt_minDecisionPoints" type="number" min="0" max="6" value="4" style="width:100%;"></label>
+            <label>决策点最小间隔: <input id="opt_decisionSeparation" type="number" min="1" max="12" value="2" style="width:100%;"></label>
+            <label>每决策点最少备选数: <input id="opt_minAlternatives" type="number" min="1" max="5" value="3" style="width:100%;"></label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+            <button id="panelApplyBtn" style="flex:1;">应用</button>
+            <button id="panelResetBtn" style="flex:1;">快速重置</button>
+        </div>
+    </div>
+    
     <div class="container">
         <div class="game-area">
             <div class="canvas-container">
@@ -318,6 +344,7 @@
                 </div>
             </div>
         </div>
+    </div>
     </div>
     <div id="toastContainer"></div>
 
@@ -452,23 +479,27 @@
                 return null;
             }
             
-            setupBoard() {
+            setupBoard(inputOptions) {
                 return new Promise((resolve, reject) => {
                 // 设置障碍物（直接使用生成器）
                 // 使用生成器创建地图（读取 UI 难度/参数）
                 const diffEl = document.getElementById('difficultyRange');
                 const diff = diffEl ? parseInt(diffEl.value || '3', 10) : 3;
-                // 映射：difficulty -> minDirChanges, maxStraight, decorationDensity
-                const options = {
+                // 映射：difficulty -> minDirChanges, maxStraight
+                const defaultOptions = {
                     maxSteps: 12,
                     maxAttempts: 200,
                     minDirChanges: Math.max(1, diff),
                     maxStraight: Math.max(1, 3 - Math.floor((diff-1)/2)),
-                    allowLongJumps: false,
-                    decorationDensity: Math.max(0, 0.06 - (diff-1)*0.01)
+                    allowLongJumps: false
                 };
+                // merge applied / incoming options (appliedGeneratorOptions overrides defaults)
+                const options = Object.assign({}, defaultOptions, window.appliedGeneratorOptions || inputOptions || {});
 
                 const applyObstacles = (obstacles) => {
+                    // 清除现有棋盘数据与颜色层，避免旧地图遗留颜色痕迹
+                    this.board = this.createEmptyBoard();
+                    this.boardColors = this.createEmptyColorLayer();
                     this.generatedPathIndices = [];
                     obstacles = obstacles || [];
                     obstacles.forEach(([row, pos, color]) => {
@@ -552,13 +583,13 @@
                             if (spinner) spinner.style.display = 'none';
                             worker.removeEventListener('message', handler);
                             // 回退到同步生成器
-                            if (typeof this.generateWinnableMapReverse === 'function') {
+                                if (typeof this.generateWinnableMapReverse === 'function') {
                                 const fallback = this.generateWinnableMapReverse(options) || [];
-                                applyObstacles(fallback);
+                                applyObstacles(fallback, []);
                                 if (spinner) spinner.style.display = 'none';
                                 resolve(fallback);
                             } else {
-                                applyObstacles([]);
+                                applyObstacles([], []);
                                 if (spinner) spinner.style.display = 'none';
                                 resolve([]);
                             }
@@ -573,11 +604,11 @@
                         worker.removeEventListener('message', handler);
                         if (typeof this.generateWinnableMapReverse === 'function') {
                             const fallback = this.generateWinnableMapReverse(options) || [];
-                            applyObstacles(fallback);
+                            applyObstacles(fallback, []);
                             if (spinner) spinner.style.display = 'none';
                             resolve(fallback);
                         } else {
-                            applyObstacles([]);
+                            applyObstacles([], []);
                             if (spinner) spinner.style.display = 'none';
                             resolve([]);
                         }
@@ -597,7 +628,7 @@
                     }
                 }
 
-                applyObstacles(obstaclesToUse);
+                applyObstacles(obstaclesToUse, []);
                 if (document.getElementById('genSpinner')) document.getElementById('genSpinner').style.display = 'none';
                 resolve(obstaclesToUse);
                 });
@@ -652,8 +683,8 @@
                 this._boardOffset = { x: canvasCenterX - boardCenterX, y: canvasCenterY - boardCenterY };
             }
 
-            regenerateMap() {
-                return this.setupBoard();
+            regenerateMap(options) {
+                return this.setupBoard(options);
             }
 
             // 生成一个保证可胜利的地图（反向构造路径）
@@ -708,6 +739,8 @@
                 }
 
                 const dirsAll = AXIAL_DIRS.slice();
+                const directionBias = (typeof options.directionBias === 'number') ? options.directionBias : 0;
+                const radialBias = (typeof options.radialBias === 'number') ? options.radialBias : 0;
 
                 // recursive DFS: try to reach startAxial from (qCur,rCur)
                 const tryFromTarget = (targetQ, targetR) => {
@@ -723,11 +756,52 @@
                             return true;
                         }
 
-                        // build candidate directions, shuffle for randomness
-                        let candidates = dirsAll.slice();
-                        shuffle(candidates);
+                        // build candidate directions with weighted preference (directionBias + radialBias)
+                        // compute map center for radial bias
+                        let centerQ = 0, centerR = 0, cnt = 0;
+                        for (const k of this.axialToIndex.keys()) {
+                            const [qStr, rStr] = k.split(',');
+                            centerQ += parseInt(qStr, 10);
+                            centerR += parseInt(rStr, 10);
+                            cnt++;
+                        }
+                        if (cnt > 0) { centerQ /= cnt; centerR /= cnt; }
 
-                        for (const d of candidates) {
+                        // base weights and group bias
+                        const weights = new Array(dirsAll.length).fill(1);
+                        const bias = Math.max(-1, Math.min(1, directionBias));
+                        if (bias > 0) {
+                            [0,3].forEach(i=>weights[i]=1+bias);
+                            [1,4].forEach(i=>weights[i]=1-bias*0.3);
+                            [2,5].forEach(i=>weights[i]=1-bias*0.3);
+                        } else if (bias < 0) {
+                            [2,5].forEach(i=>weights[i]=1+Math.abs(bias));
+                            [0,3].forEach(i=>weights[i]=1-Math.abs(bias)*0.3);
+                            [1,4].forEach(i=>weights[i]=1-Math.abs(bias)*0.3);
+                        }
+
+                        if (radialBias && Math.abs(radialBias) > 1e-6) {
+                            const radialX = qCur - centerQ;
+                            const radialY = rCur - centerR;
+                            const radialLen = Math.sqrt(radialX*radialX + radialY*radialY) || 1;
+                            for (let di=0; di<dirsAll.length; di++) {
+                                const dir = dirsAll[di];
+                                const dirLen = Math.sqrt(dir[0]*dir[0] + dir[1]*dir[1]) || 1;
+                                const dot = (radialX*dir[0] + radialY*dir[1])/(radialLen*dirLen);
+                                weights[di] = Math.max(0.001, weights[di] * (1 + radialBias * dot));
+                            }
+                        }
+
+                        // softmax normalization
+                        const temp = Math.max(0.3, 1 - Math.abs(bias) * 0.6);
+                        const exps = weights.map(w => Math.exp(w / temp));
+                        const sumExp = exps.reduce((s,v)=>s+v,0) || 1;
+                        const probs = exps.map(v => v / sumExp);
+                        // order indices by descending probability
+                        const order = probs.map((p,i)=>[p,i]).sort((a,b)=>b[0]-a[0]).map(x=>x[1]);
+
+                        for (const idx of order) {
+                            const d = dirsAll[idx];
                             const dq = d[0], dr = d[1];
                             const prevQ = qCur + dq * 2;
                             const prevR = rCur + dr * 2;
@@ -1171,7 +1245,7 @@
                     }
                 }
 
-                // 已移除路径高亮功能 — 不再绘制生成路径索引
+                // 已移除路径高亮和装饰层绘制
                 
                 // 显示可跳目标（全部显示为绿色）
                 if (this.selected) {
@@ -1373,40 +1447,33 @@
                 diffRange.addEventListener('input', () => { diffValue.textContent = diffRange.value; });
             }
 
+            // directionBias display link
+            const dbRange = document.getElementById('opt_directionBias');
+            const dbValue = document.getElementById('opt_directionBiasValue');
+            if (dbRange && dbValue) {
+                dbValue.textContent = dbRange.value;
+                dbRange.addEventListener('input', () => { dbValue.textContent = dbRange.value; });
+            }
+
+            // branchChance display link
+            const bcRange = document.getElementById('opt_branchChance');
+            const bcValue = document.getElementById('opt_branchChanceValue');
+            if (bcRange && bcValue) {
+                bcValue.textContent = bcRange.value;
+                bcRange.addEventListener('input', () => { bcValue.textContent = bcRange.value; });
+            }
+
+            // radialBias display link
+            const rbRange = document.getElementById('opt_radialBias');
+            const rbValue = document.getElementById('opt_radialBiasValue');
+            if (rbRange && rbValue) {
+                rbValue.textContent = rbRange.value;
+                rbRange.addEventListener('input', () => { rbValue.textContent = rbRange.value; });
+            }
+
             const game = new Game();
 
-            // 添加参数面板（简单实现）
-            const panelHtml = `
-                <h3 style="margin-top:0;margin-bottom:8px;">生成器参数</h3>
-                <div style="display:grid;gap:8px;">
-                    <label style="display:flex;align-items:center;gap:8px;">难度：<input id="difficultyRange" type="range" min="1" max="5" value="3" style="width:120px;"> <span id="difficultyValue">3</span></label>
-                    <label>maxSteps: <input id="opt_maxSteps" type="number" min="4" max="48" value="12" style="width:100%;"></label>
-                    <label>maxAttempts: <input id="opt_maxAttempts" type="number" min="50" max="2000" value="200" style="width:100%;"></label>
-                    <label>minDirChanges: <input id="opt_minDirChanges" type="number" min="1" max="6" value="1" style="width:100%;"></label>
-                    <label>maxStraight: <input id="opt_maxStraight" type="number" min="1" max="6" value="2" style="width:100%;"></label>
-                    <label>decorationDensity: <input id="opt_decorationDensity" type="number" step="0.01" min="0" max="0.2" value="0.04" style="width:100%;"></label>
-                    <label style="display:flex;align-items:center;gap:8px;"><input id="opt_allowLongJumps" type="checkbox"> 允许长跳</label>
-                </div>
-                <div style="display:flex;gap:8px;margin-top:10px;">
-                    <button id="panelApplyBtn" style="flex:1;">应用</button>
-                    <button id="panelResetBtn" style="flex:1;">快速重置</button>
-                </div>
-            `;
-            const panel = document.createElement('div');
-            panel.className = 'panel';
-            panel.innerHTML = panelHtml;
-            // 将面板与 container 放入同一水平行并居中显示
-            const oldContainer = document.querySelector('.container');
-            const layoutRow = document.createElement('div');
-            layoutRow.className = 'layout-row';
-            if (oldContainer && oldContainer.parentNode) {
-                oldContainer.parentNode.insertBefore(layoutRow, oldContainer);
-                layoutRow.appendChild(panel);
-                layoutRow.appendChild(oldContainer);
-            } else {
-                // 若不存在 container，则将 panel 单独插入
-                document.body.insertBefore(panel, document.body.firstChild);
-            }
+            // 面板已静态化到 HTML（位于 container 之前）
 
             // 默认 applied options
             window.appliedGeneratorOptions = null;
@@ -1415,11 +1482,18 @@
                 const get = (id, parseFn, fallback) => { const el = document.getElementById(id); if (!el) return fallback; const v = el.value; return parseFn ? parseFn(v) : v; };
                 const opts = {
                     maxSteps: get('opt_maxSteps', v=>parseInt(v,10), 12),
-                    maxAttempts: get('opt_maxAttempts', v=>parseInt(v,10), 200),
-                    minDirChanges: get('opt_minDirChanges', v=>parseInt(v,10), 1),
-                    maxStraight: get('opt_maxStraight', v=>parseInt(v,10), 2),
-                    decorationDensity: get('opt_decorationDensity', v=>parseFloat(v), 0.04),
-                    allowLongJumps: document.getElementById('opt_allowLongJumps') ? document.getElementById('opt_allowLongJumps').checked : false
+                    maxAttempts: get('opt_maxAttempts', v=>parseInt(v,10), 400),
+                    minDirChanges: get('opt_minDirChanges', v=>parseInt(v,10), 2),
+                    maxStraight: get('opt_maxStraight', v=>parseInt(v,10), 1),
+                    minDecisionPoints: get('opt_minDecisionPoints', v=>parseInt(v,10), 2),
+                    decisionSeparation: get('opt_decisionSeparation', v=>parseInt(v,10), 3),
+                    minAlternatives: get('opt_minAlternatives', v=>parseInt(v,10), 2),
+                    // decorationDensity removed
+                    allowLongJumps: document.getElementById('opt_allowLongJumps') ? document.getElementById('opt_allowLongJumps').checked : true,
+                    maxFactor: get('opt_maxFactor', v=>parseInt(v,10), 6),
+                    directionBias: get('opt_directionBias', v=>parseFloat(v), 0),
+                    branchChance: get('opt_branchChance', v=>parseFloat(v), 0.08),
+                    radialBias: get('opt_radialBias', v=>parseFloat(v), 0.08)
                 };
                 return opts;
             };
@@ -1428,14 +1502,34 @@
             const applyBtn = document.getElementById('panelApplyBtn');
             const resetBtn = document.getElementById('panelResetBtn');
             const applyDefaults = () => {
-                document.getElementById('opt_maxSteps').value = 12;
-                document.getElementById('opt_maxAttempts').value = 200;
+                // Stronger/aggressive defaults
+                document.getElementById('difficultyRange').value = 5;
+                const diffSpan = document.getElementById('difficultyValue'); if (diffSpan) diffSpan.textContent = 5;
+                document.getElementById('opt_maxSteps').value = 18;
+                document.getElementById('opt_maxAttempts').value = 2000;
                 document.getElementById('opt_minDirChanges').value = 1;
-                document.getElementById('opt_maxStraight').value = 2;
-                document.getElementById('opt_decorationDensity').value = 0.04;
-                document.getElementById('opt_allowLongJumps').checked = false;
+                document.getElementById('opt_maxStraight').value = 1;
+                // decorationDensity removed
+                document.getElementById('opt_allowLongJumps').checked = true;
+                document.getElementById('opt_maxFactor').value = 8;
+                // direction bias: keep neutral to allow branches
+                document.getElementById('opt_directionBias').value = 0.0;
+                const dbVal = document.getElementById('opt_directionBias').value; const dbSpan = document.getElementById('opt_directionBiasValue'); if (dbSpan) dbSpan.textContent = dbVal;
+                // branchChance / radialBias defaults (made more aggressive)
+                if (document.getElementById('opt_branchChance')) document.getElementById('opt_branchChance').value = 0.35;
+                const bcSpan = document.getElementById('opt_branchChanceValue'); if (bcSpan) bcSpan.textContent = document.getElementById('opt_branchChance').value;
+                if (document.getElementById('opt_radialBias')) document.getElementById('opt_radialBias').value = 0.4;
+                const rbSpan = document.getElementById('opt_radialBiasValue'); if (rbSpan) rbSpan.textContent = document.getElementById('opt_radialBias').value;
+                if (document.getElementById('opt_allowLongJumps')) document.getElementById('opt_allowLongJumps').checked = true;
+                // new decision UI defaults
+                if (document.getElementById('opt_minDecisionPoints')) document.getElementById('opt_minDecisionPoints').value = 2;
+                if (document.getElementById('opt_decisionSeparation')) document.getElementById('opt_decisionSeparation').value = 3;
+                if (document.getElementById('opt_minAlternatives')) document.getElementById('opt_minAlternatives').value = 2;
             };
             applyDefaults();
+
+            // 保存为已应用的激进默认参数，页面加载后直接使用这些激进默认值
+            window.appliedGeneratorOptions = collectOptionsFromPanel();
 
             if (applyBtn) {
                 applyBtn.addEventListener('click', () => {
@@ -1460,6 +1554,12 @@
                 regenBtn.addEventListener('click', async () => {
                     try {
                         regenBtn.disabled = true;
+                        // 隐藏可能存在的胜利提示，清除 game 的胜利标志
+                        if (typeof game !== 'undefined' && game) {
+                            game.gameWon = false;
+                            const vmsg = document.getElementById('victoryMessage');
+                            if (vmsg) vmsg.style.display = 'none';
+                        }
                         const toastId = showToast('正在生成新地图', { type: 'info', persist: true });
                         window.currentRegenToastId = toastId;
                         // 使用全局 appliedGeneratorOptions（通过面板的“应用”设置）
