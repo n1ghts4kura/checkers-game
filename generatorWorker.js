@@ -149,10 +149,12 @@ onmessage = function(e) {
       const queue = [];
       const visitedTargets = new Set();
       const obstacleSet = new Set();
+      const pathCells = new Set();
       
       const startKey = `${startAxial[0]},${startAxial[1]}`;
       queue.push({ q: startAxial[0], r: startAxial[1], depth: 0 });
       visitedTargets.add(startKey);
+      pathCells.add(startKey);
       
       let victoryReached = 0;
       let nodesProcessed = 0;
@@ -185,7 +187,7 @@ onmessage = function(e) {
             const tgtKey = `${tgtQ},${tgtR}`;
             
             if (!axialToIndex.has(midKey) || !axialToIndex.has(tgtKey)) continue;
-            if (obstacleSet.has(midKey) || midKey === startKey) continue;
+            if (obstacleSet.has(midKey) || pathCells.has(midKey) || midKey === startKey) continue;
             if (obstacleSet.has(tgtKey)) continue;
             
             let pathClear = true;
@@ -268,6 +270,7 @@ onmessage = function(e) {
           if (!visitedTargets.has(jump.tgtKey)) {
             visitedTargets.add(jump.tgtKey);
             queue.push({ q: jump.tgtQ, r: jump.tgtR, depth: curr.depth + 1 });
+            pathCells.add(jump.tgtKey);
           }
           branchesCreated++;
         }
